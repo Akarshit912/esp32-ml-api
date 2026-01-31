@@ -76,13 +76,11 @@ def predict(input: SensorInput):
     try:
         rain, month, wind_speed = fetch_weather(input.lat, input.lon)
 
-        # IMPORTANT: use DataFrame with correct feature names
         features = pd.DataFrame([{
-            "temperature": input.temperature,
-            "humidity": input.humidity,
-            "rain": rain,
-            "month": month,
-            "wind_speed": wind_speed
+            "Temperature": input.temperature,
+            "RH": input.humidity,
+            "Rain": rain,
+            "Ws": wind_speed
         }])
 
         prediction = int(model.predict(features)[0])
@@ -90,10 +88,10 @@ def predict(input: SensorInput):
         return {
             "prediction": prediction,
             "rain": rain,
-            "month": month,
-            "wind_speed": wind_speed
+            "wind_speed": wind_speed,
+            "month": month
         }
 
     except Exception as e:
-        # Expose exact error instead of silent 500
         raise HTTPException(status_code=500, detail=str(e))
+
