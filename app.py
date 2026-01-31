@@ -80,6 +80,7 @@ def predict(input: SensorInput):
             "Temperature": input.temperature,
             "RH": input.humidity,
             "Rain": rain,
+            "month": month,
             "Ws": wind_speed
         }])
 
