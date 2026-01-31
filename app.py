@@ -10,7 +10,6 @@ import os
 # CONFIG
 # -----------------------------
 WEATHER_API_KEY = os.getenv("WEATHER_API_KEY")
-
 if not WEATHER_API_KEY:
     raise RuntimeError("WEATHER_API_KEY environment variable not set")
 
@@ -51,10 +50,9 @@ def health():
 # -----------------------------
 def fetch_weather(lat: float, lon: float):
     url = (
-        "https://api.openweathermap.org/data/2.5/weather"
+        f"https://api.openweathermap.org/data/2.5/weather"
         f"?lat={lat}&lon={lon}&appid={WEATHER_API_KEY}&units=metric"
     )
-
     try:
         r = requests.get(url, timeout=5)
         r.raise_for_status()
@@ -66,7 +64,7 @@ def fetch_weather(lat: float, lon: float):
     wind_speed = data["wind"]["speed"]
     month = datetime.utcnow().month
 
-    return rain, month, wind_speed
+    return rain, wind_speed, month
 
 # -----------------------------
 # PREDICTION ENDPOINT
@@ -74,18 +72,22 @@ def fetch_weather(lat: float, lon: float):
 @app.post("/predict")
 def predict(input: SensorInput):
     try:
-        rain, month, wind_speed = fetch_weather(input.lat, input.lon)
+        # Fetch live weather data
+        rain, wind_speed, month = fetch_weather(input.lat, input.lon)
 
+        # Build DataFrame with exact feature names expected by the model
         features = pd.DataFrame([{
             "Temperature": input.temperature,
             "RH": input.humidity,
             "Rain": rain,
-            "month": month,
-            "Ws": wind_speed
+            "Ws": wind_speed,
+            "month": month   # required by trained model
         }])
 
+        # Make prediction
         prediction = int(model.predict(features)[0])
 
+        # Return prediction + some useful metadata
         return {
             "prediction": prediction,
             "rain": rain,
@@ -94,5 +96,5 @@ def predict(input: SensorInput):
         }
 
     except Exception as e:
+        # Return explicit error if anything fails
         raise HTTPException(status_code=500, detail=str(e))
-
