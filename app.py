@@ -1,62 +1,99 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-import joblib
-import numpy as np
 import requests
+import pickle
+import pandas as pd
 from datetime import datetime
 import os
 
+# -----------------------------
+# CONFIG
+# -----------------------------
 WEATHER_API_KEY = os.getenv("WEATHER_API_KEY")
 
-model = joblib.load("rfc_pipeline.pkl")
+if not WEATHER_API_KEY:
+    raise RuntimeError("WEATHER_API_KEY environment variable not set")
 
-app = FastAPI(title="ESP32 Weather ML API")
+MODEL_PATH = "rfc_pipeline.pkl"
 
+# -----------------------------
+# LOAD MODEL
+# -----------------------------
+try:
+    with open(MODEL_PATH, "rb") as f:
+        model = pickle.load(f)
+except Exception as e:
+    raise RuntimeError(f"Failed to load model: {e}")
+
+# -----------------------------
+# FASTAPI APP
+# -----------------------------
+app = FastAPI(title="ESP32 ML Prediction API")
+
+# -----------------------------
+# REQUEST SCHEMA
+# -----------------------------
 class SensorInput(BaseModel):
     temperature: float
     humidity: float
     lat: float
     lon: float
 
+# -----------------------------
+# HEALTH CHECK
+# -----------------------------
 @app.get("/health")
 def health():
     return {"status": "ok"}
 
-def fetch_weather(lat, lon):
+# -----------------------------
+# WEATHER FETCH
+# -----------------------------
+def fetch_weather(lat: float, lon: float):
+    url = (
+        "https://api.openweathermap.org/data/2.5/weather"
+        f"?lat={lat}&lon={lon}&appid={WEATHER_API_KEY}&units=metric"
+    )
+
     try:
-        url = (
-            "https://api.openweathermap.org/data/2.5/weather"
-            f"?lat={lat}&lon={lon}&appid={WEATHER_API_KEY}&units=metric"
-        )
         r = requests.get(url, timeout=5)
         r.raise_for_status()
         data = r.json()
+    except Exception as e:
+        raise RuntimeError(f"Weather API error: {e}")
 
-        rain = data.get("rain", {}).get("1h", 0.0)
-        wind_speed = data["wind"]["speed"]
-        month = datetime.utcnow().month
+    rain = data.get("rain", {}).get("1h", 0.0)
+    wind_speed = data["wind"]["speed"]
+    month = datetime.utcnow().month
 
-        return rain, month, wind_speed
-    except:
-        raise HTTPException(status_code=500, detail="Weather API error")
+    return rain, month, wind_speed
 
+# -----------------------------
+# PREDICTION ENDPOINT
+# -----------------------------
 @app.post("/predict")
 def predict(input: SensorInput):
-    rain, month, wind_speed = fetch_weather(input.lat, input.lon)
+    try:
+        rain, month, wind_speed = fetch_weather(input.lat, input.lon)
 
-    import pandas as pd
+        # IMPORTANT: use DataFrame with correct feature names
+        features = pd.DataFrame([{
+            "temperature": input.temperature,
+            "humidity": input.humidity,
+            "rain": rain,
+            "month": month,
+            "wind_speed": wind_speed
+        }])
 
-    features = pd.DataFrame([{
-        "temperature": input.temperature,
-        "humidity": input.humidity,
-        "rain": rain,
-        "month": month,
-        "wind_speed": wind_speed
-    }])
+        prediction = int(model.predict(features)[0])
 
-    prediction = int(model.predict(features)[0])
+        return {
+            "prediction": prediction,
+            "rain": rain,
+            "month": month,
+            "wind_speed": wind_speed
+        }
 
-    return {
-        "prediction": prediction,
-        "blink": prediction == 0
-    }
+    except Exception as e:
+        # Expose exact error instead of silent 500
+        raise HTTPException(status_code=500, detail=str(e))
